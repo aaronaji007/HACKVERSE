@@ -1,0 +1,5 @@
+{
+  "description": "Engineering drawing generation from natural-language prompts.",
+  "requestFramePermissions": [],
+  "name": "engdraw"
+}
