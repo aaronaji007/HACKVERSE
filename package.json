@@ -1,0 +1,45 @@
+{
+  "name": "grafein",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit",
+    "ocr:pdf": "python tools/ocr_pdf.py",
+    "audit:full": "cmd /c npx tsc tools\\full_audit.ts lib\\geometryEngine.ts lib\\examples.ts types.ts --module commonjs --target es2020 --outDir .audit-build-full-cjs --skipLibCheck --esModuleInterop && powershell -NoProfile -Command \"Set-Content -Path '.audit-build-full-cjs/package.json' -Value '{\\\"type\\\":\\\"commonjs\\\"}'\" && node .audit-build-full-cjs\\tools\\full_audit.js",
+    "audit:sweep": "cmd /c npx tsc tools\\parameter_sweep.ts tools\\full_audit.ts lib\\geometryEngine.ts types.ts --module commonjs --target es2022 --outDir .audit-build-full-cjs --skipLibCheck --esModuleInterop && powershell -NoProfile -Command \"Set-Content -Path '.audit-build-full-cjs/package.json' -Value '{\\\"type\\\":\\\"commonjs\\\"}'\" && node .audit-build-full-cjs\\tools\\parameter_sweep.js",
+    "audit:book": "cmd /c npx tsc tools\\book_audit.ts lib\\geometryEngine.ts lib\\examples.ts types.ts --module commonjs --target es2020 --outDir .audit-build-cjs --skipLibCheck --esModuleInterop && powershell -NoProfile -Command \"Set-Content -Path '.audit-build-cjs/package.json' -Value '{\\\"type\\\":\\\"commonjs\\\"}'\" && node .audit-build-cjs\\tools\\book_audit.js"
+  },
+  "dependencies": {
+    "@types/three": "^0.186.0",
+    "@vercel/analytics": "^2.0.1",
+    "lenis": "^1.3.26",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "three": "^0.186.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.0.0",
+    "clsx": "^2.1.1",
+    "framer-motion": "^13.2.0",
+    "lucide-react": "^1.41.0",
+    "tailwind-merge": "^3.6.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  },
+  "allowScripts": {
+    "esbuild@0.27.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.27.2": true,
+    "protobufjs@7.6.6": true
+  }
+}

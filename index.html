@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>grafein.in · Engineering Drawing AI</title>
+  <link id="dynamic-favicon-svg" rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link id="dynamic-favicon" rel="icon" type="image/png" sizes="32x32" href="/favicon-dark.png">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <script>
+    (function() {
+      function updateThemeFavicon(isDark) {
+        var pngIcon = document.getElementById('dynamic-favicon');
+        if (pngIcon) {
+          pngIcon.href = isDark ? '/favicon-light.png' : '/favicon-dark.png';
+        }
+      }
+      try {
+        var mq = window.matchMedia('(prefers-color-scheme: dark)');
+        updateThemeFavicon(mq.matches);
+        if (mq.addEventListener) {
+          mq.addEventListener('change', function(e) { updateThemeFavicon(e.matches); });
+        } else if (mq.addListener) {
+          mq.addListener(function(e) { updateThemeFavicon(e.matches); });
+        }
+      } catch (err) {}
+    })();
+  </script>
+  <meta name="description" content="grafein.in - Deterministic computational geometry & engineering graphics projection compiler.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/index.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
