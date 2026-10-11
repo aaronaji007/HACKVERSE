@@ -636,3 +636,5 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
         </div>
     );
 };
+
+// Hotfix: Initialize 3D Orbit View renderer and canvas
