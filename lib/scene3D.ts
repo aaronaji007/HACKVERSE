@@ -886,3 +886,5 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
         title: (params as any)?.type?.replace(/_/g, ' ')?.toUpperCase() || '3D SPATIAL PROJECTION',
     };
 }
+
+// Map calculated 3D coordinates directly to Three.js buffer geometry
