@@ -21,6 +21,9 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
     const [sceneData, setSceneData] = useState<Scene3DData | null>(null);
     const [currentStep, setCurrentStep] = useState<number>(1);
     const [isPlaying, setIsPlaying] = useState<boolean>(false);
+    const [showLabels, setShowLabels] = useState<boolean>(true);
+    const [showDimensions, setShowDimensions] = useState<boolean>(true);
+    const planeLabelsGroupRef = useRef<THREE.Group | null>(null);
 
     useEffect(() => {
         const data = resolveScene3D(geometry);
@@ -140,9 +143,13 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
             gpGrid.position.set(0, 0.05, 0);
             scene.add(gpGrid);
 
+            const planeLabelsGroup = new THREE.Group();
+            scene.add(planeLabelsGroup);
+            planeLabelsGroupRef.current = planeLabelsGroup;
+
             const gpBadge = createLabel('Ground Plane (G.P.)', 'plane-label');
             gpBadge.position.set(-halfSize * 0.45, 0.2, halfSize * 0.55);
-            scene.add(gpBadge);
+            planeLabelsGroup.add(gpBadge);
 
             const ppGeo = new THREE.PlaneGeometry(halfSize * 1.1, halfSize * 0.85);
             const ppMat = new THREE.MeshBasicMaterial({
@@ -164,8 +171,12 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
 
             const ppBadge = createLabel('Picture Plane (P.P.)', 'plane-label');
             ppBadge.position.set(-halfSize * 0.45, halfSize * 0.8, 0.2);
-            scene.add(ppBadge);
+            planeLabelsGroup.add(ppBadge);
         } else {
+            const planeLabelsGroup = new THREE.Group();
+            scene.add(planeLabelsGroup);
+            planeLabelsGroupRef.current = planeLabelsGroup;
+
             // HP Plane
             const hpGeo = new THREE.PlaneGeometry(halfSize, halfSize);
             const hpMat = new THREE.MeshBasicMaterial({
@@ -227,19 +238,19 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
 
             const xLabel = createLabel('X', 'xy-label');
             xLabel.position.set(-halfSize * 0.6, 0, 0);
-            scene.add(xLabel);
+            planeLabelsGroup.add(xLabel);
 
             const yLabel = createLabel('Y', 'xy-label');
             yLabel.position.set(halfSize * 0.6, 0, 0);
-            scene.add(yLabel);
+            planeLabelsGroup.add(yLabel);
 
             const hpBadge = createLabel('HP (Horizontal Plane)', 'plane-label');
             hpBadge.position.set(-halfSize * 0.35, 0.2, halfSize * 0.85);
-            scene.add(hpBadge);
+            planeLabelsGroup.add(hpBadge);
 
             const vpBadge = createLabel('VP (Vertical Plane)', 'plane-label');
             vpBadge.position.set(-halfSize * 0.35, halfSize * 0.85, 0.2);
-            scene.add(vpBadge);
+            planeLabelsGroup.add(vpBadge);
         }
 
         // Dedicated Group for dynamic step elements
@@ -329,6 +340,15 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
         const stepGroup = stepGroupRef.current;
         if (!stepGroup || !sceneData) return;
 
+        if (planeLabelsGroupRef.current) {
+            planeLabelsGroupRef.current.visible = showLabels;
+            planeLabelsGroupRef.current.traverse((child) => {
+                if ((child as any).isCSS2DObject && (child as any).element) {
+                    (child as any).element.style.display = showLabels ? 'block' : 'none';
+                }
+            });
+        }
+
         // Clean up previous step objects and CSS2D labels
         while (stepGroup.children.length > 0) {
             const obj = stepGroup.children[0];
@@ -368,6 +388,8 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
 
         // Filter and add Segments
         segments.forEach((seg) => {
+            if (!showDimensions && seg.role === 'dimension') return;
+
             const isStageRole = seg.role === 'stage';
             const isAxisRole = seg.role === 'axis';
 
@@ -469,7 +491,7 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
             marker.position.set(p.x, p.y, p.z);
             stepGroup.add(marker);
 
-            if (p.label) {
+            if (showLabels && p.label) {
                 const labelObj = createStepLabel(p.label, isStation ? 'station-label' : isPiercing ? 'pierce-label' : 'vertex-label');
                 labelObj.position.set(p.x, p.y + (isStation ? 4 : 2.5), p.z);
                 stepGroup.add(labelObj);
@@ -510,7 +532,7 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
             const mesh = new THREE.Mesh(geo, mat);
             stepGroup.add(mesh);
 
-            if (poly.label) {
+            if (showLabels && poly.label) {
                 const cx = poly.points.reduce((sum, p) => sum + p.x, 0) / poly.points.length;
                 const cy = poly.points.reduce((sum, p) => sum + p.y, 0) / poly.points.length;
                 const cz = poly.points.reduce((sum, p) => sum + p.z, 0) / poly.points.length;
@@ -521,51 +543,59 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
         });
 
         // Dimensions
-        dimensions
-            .filter((dim) => (dim.step || 1) <= currentStep)
-            .forEach((dim) => {
-                const midX = (dim.p1.x + dim.p2.x) / 2;
-                const midY = (dim.p1.y + dim.p2.y) / 2;
-                const midZ = (dim.p1.z + dim.p2.z) / 2;
+        if (showDimensions) {
+            dimensions
+                .filter((dim) => (dim.step || 1) <= currentStep)
+                .forEach((dim) => {
+                    const midX = (dim.p1.x + dim.p2.x) / 2;
+                    const midY = (dim.p1.y + dim.p2.y) / 2;
+                    const midZ = (dim.p1.z + dim.p2.z) / 2;
 
-                const dimLabel = createStepLabel(dim.label, 'dimension-label');
-                dimLabel.position.set(midX, midY + 3, midZ);
-                stepGroup.add(dimLabel);
-            });
+                    if (showLabels) {
+                        const dimLabel = createStepLabel(dim.label, 'dimension-label');
+                        dimLabel.position.set(midX, midY + 3, midZ);
+                        stepGroup.add(dimLabel);
+                    }
+                });
+        }
 
         // Angle Annotations
-        angleAnnotations.forEach((ann) => {
-            const stepNum = ann.step || 1;
-            let showAngle = false;
-            if (currentStep === 2 && stepNum === 2) showAngle = true;
-            else if (currentStep === 3 && (stepNum === 2 || stepNum === 3)) showAngle = true;
-            else if (currentStep === 4 && (stepNum === 2 || stepNum === 3)) showAngle = true;
-            else if (stepNum <= currentStep && sceneData.maxStep <= 2) showAngle = true;
+        if (showDimensions) {
+            angleAnnotations.forEach((ann) => {
+                const stepNum = ann.step || 1;
+                let showAngle = false;
+                if (currentStep === 2 && stepNum === 2) showAngle = true;
+                else if (currentStep === 3 && (stepNum === 2 || stepNum === 3)) showAngle = true;
+                else if (currentStep === 4 && (stepNum === 2 || stepNum === 3)) showAngle = true;
+                else if (stepNum <= currentStep && sceneData.maxStep <= 2) showAngle = true;
 
-            if (!showAngle) return;
+                if (!showAngle) return;
 
-            const arcGeo = new THREE.BufferGeometry();
-            const arcPts: THREE.Vector3[] = [];
-            const steps = 18;
-            const v1 = new THREE.Vector3(ann.dirBase.x, ann.dirBase.y, ann.dirBase.z).normalize();
-            const v2 = new THREE.Vector3(ann.dirInclined.x, ann.dirInclined.y, ann.dirInclined.z).normalize();
+                const arcGeo = new THREE.BufferGeometry();
+                const arcPts: THREE.Vector3[] = [];
+                const steps = 18;
+                const v1 = new THREE.Vector3(ann.dirBase.x, ann.dirBase.y, ann.dirBase.z).normalize();
+                const v2 = new THREE.Vector3(ann.dirInclined.x, ann.dirInclined.y, ann.dirInclined.z).normalize();
 
-            for (let i = 0; i <= steps; i++) {
-                const t = i / steps;
-                const v = new THREE.Vector3().lerpVectors(v1, v2, t).normalize().multiplyScalar(ann.radius);
-                arcPts.push(new THREE.Vector3(ann.origin.x + v.x, ann.origin.y + v.y, ann.origin.z + v.z));
-            }
-            arcGeo.setFromPoints(arcPts);
-            const arcMat = new THREE.LineBasicMaterial({ color: 0x2563eb, linewidth: 2 });
-            const arcLine = new THREE.Line(arcGeo, arcMat);
-            stepGroup.add(arcLine);
+                for (let i = 0; i <= steps; i++) {
+                    const t = i / steps;
+                    const v = new THREE.Vector3().lerpVectors(v1, v2, t).normalize().multiplyScalar(ann.radius);
+                    arcPts.push(new THREE.Vector3(ann.origin.x + v.x, ann.origin.y + v.y, ann.origin.z + v.z));
+                }
+                arcGeo.setFromPoints(arcPts);
+                const arcMat = new THREE.LineBasicMaterial({ color: 0x2563eb, linewidth: 2 });
+                const arcLine = new THREE.Line(arcGeo, arcMat);
+                stepGroup.add(arcLine);
 
-            const midPt = arcPts[Math.floor(steps / 2)];
-            const textLabel = createStepLabel(ann.label, 'angle-label');
-            textLabel.position.set(midPt.x, midPt.y + 2, midPt.z);
-            stepGroup.add(textLabel);
-        });
-    }, [sceneData, currentStep]);
+                if (showLabels) {
+                    const midPt = arcPts[Math.floor(steps / 2)];
+                    const textLabel = createStepLabel(ann.label, 'angle-label');
+                    textLabel.position.set(midPt.x, midPt.y + 2, midPt.z);
+                    stepGroup.add(textLabel);
+                }
+            });
+        }
+    }, [sceneData, currentStep, showLabels, showDimensions]);
 
     const activeStepInfo = sceneData?.stepsInfo.find((s) => s.step === currentStep) || sceneData?.stepsInfo[0];
 
@@ -703,6 +733,36 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
                                 className="px-2.5 py-1 text-xs font-semibold text-white bg-[#0b57ff] hover:bg-[#0047d4] transition-colors cursor-pointer"
                             >
                                 3D Orbit
+                            </button>
+                        </div>
+
+                        {/* Display Clutter Toggles */}
+                        <div className="flex items-center gap-1.5 border-l border-[#c7d7ff] pl-3 ml-1">
+                            <button
+                                type="button"
+                                onClick={() => setShowLabels((prev) => !prev)}
+                                className={`px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                    showLabels
+                                        ? 'bg-[#0b57ff] text-white shadow-xs'
+                                        : 'bg-[#edf3ff] text-[#4f5f85] hover:bg-[#dbe7ff] hover:text-[#050816]'
+                                }`}
+                                title={showLabels ? 'Hide all labels to unclutter 3D view' : 'Show vertex and plane labels'}
+                            >
+                                <span>🏷️</span>
+                                <span>Labels: {showLabels ? 'ON' : 'OFF'}</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setShowDimensions((prev) => !prev)}
+                                className={`px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                    showDimensions
+                                        ? 'bg-[#0b57ff] text-white shadow-xs'
+                                        : 'bg-[#edf3ff] text-[#4f5f85] hover:bg-[#dbe7ff] hover:text-[#050816]'
+                                }`}
+                                title={showDimensions ? 'Hide dimensions and angle annotations to unclutter 3D view' : 'Show dimensions and angle arcs'}
+                            >
+                                <span>📐</span>
+                                <span>Dimensions: {showDimensions ? 'ON' : 'OFF'}</span>
                             </button>
                         </div>
                     </div>
