@@ -3383,3 +3383,5 @@ export class GeometryEngine {
 // Final cleanup for inclined solid
 
 // TODO: implement inclined solid logic correctly
+
+// Fixed rotation matrix for HP inclination
