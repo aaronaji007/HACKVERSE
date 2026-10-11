@@ -247,11 +247,25 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
         segments
             .filter((s) => (s.step || 1) <= currentStep)
             .forEach((seg) => {
+                const isPastStage = seg.role === 'stage' && (seg.step || 1) < currentStep;
                 const pts = [
                     new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z),
                     new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z),
                 ];
                 const geo = new THREE.BufferGeometry().setFromPoints(pts);
+
+                if (isPastStage) {
+                    const lineMat = new THREE.LineDashedMaterial({
+                        color: new THREE.Color('#cbd5e1'),
+                        dashSize: 2.5,
+                        gapSize: 2,
+                        linewidth: 1,
+                    });
+                    const line = new THREE.Line(geo, lineMat);
+                    line.computeLineDistances();
+                    scene.add(line);
+                    return;
+                }
 
                 if (seg.style === 'dashed' || seg.role === 'projector' || seg.role === 'visual_ray') {
                     const lineMat = new THREE.LineDashedMaterial({
@@ -323,7 +337,7 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
         });
 
         points
-            .filter((p) => (p.step || 1) <= currentStep)
+            .filter((p) => (p.role === 'stage' ? (p.step || 1) === currentStep : (p.step || 1) <= currentStep))
             .forEach((p) => {
                 const isStation = p.role === 'station';
                 const isPiercing = p.role === 'piercing';
