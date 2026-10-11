@@ -3005,32 +3005,32 @@ export class GeometryEngine {
         }
     }
 
-    private projectSectionedSolid(data: SectionSolidSchema) {
-        projectSectionedSolid(this, data);
+    private projectSectionedSolid(_data: SectionSolidSchema) {
+        // Not used in hackverse edition
     }
 
     private projectPlaneSurface(data: PlaneSurfaceSchema) {
         projectPlaneSurface(this, data);
     }
 
-    private projectPerspectiveProjection(data: PerspectiveProjectionSchema) {
-        projectPerspectiveProjection(this, data);
+    private projectPerspectiveProjection(_data: PerspectiveProjectionSchema) {
+        // Not used in hackverse edition
     }
 
-    private projectIsometricProjection(data: IsometricProjectionSchema) {
-        projectIsometricProjection(this, data);
+    private projectIsometricProjection(_data: IsometricProjectionSchema) {
+        // Not used in hackverse edition
     }
 
-    private projectAdvancedSection(data: AdvancedSectionSchema) {
-        projectAdvancedSection(this, data);
+    private projectAdvancedSection(_data: AdvancedSectionSchema) {
+        // Not used in hackverse edition
     }
 
-    private projectAdvancedDevelopment(data: AdvancedDevelopmentSchema) {
-        projectAdvancedDevelopment(this, data);
+    private projectAdvancedDevelopment(_data: AdvancedDevelopmentSchema) {
+        // Not used in hackverse edition
     }
 
-    private projectCompositeSolid(data: CompositeSolidSchema) {
-        projectCompositeSolid(this, data);
+    private projectCompositeSolid(_data: CompositeSolidSchema) {
+        // Not used in hackverse edition
     }
     public projectAuxiliaryView(data: AuxiliaryViewSchema) {
         const isPrism = ['prism', 'cylinder', 'cube'].includes(data.solid_type);

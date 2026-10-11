@@ -7,7 +7,7 @@ export interface Point3D {
     y: number; // Height above HP / Ground Plane (y >= 0 is above HP/GP)
     z: number; // Depth in front of VP / relative to PP (z >= 0 is in front of VP/PP)
     step?: number;
-    role?: 'object' | 'projection' | 'dimension' | 'station' | 'piercing';
+    role?: 'object' | 'projection' | 'dimension' | 'station' | 'piercing' | 'stage';
 }
 
 export interface Segment3D {
@@ -16,7 +16,7 @@ export interface Segment3D {
     end: Point3D;
     style?: 'solid' | 'dashed' | 'chain';
     color?: string;
-    role?: 'object' | 'projector' | 'axis' | 'section' | 'dimension' | 'cutting_plane' | 'visual_ray' | 'horizon' | 'ground';
+    role?: 'object' | 'projector' | 'axis' | 'section' | 'dimension' | 'cutting_plane' | 'visual_ray' | 'horizon' | 'ground' | 'stage';
     step?: number;
 }
 
@@ -509,8 +509,8 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
             }
         }
 
-        let theta = (pData?.inclination_with_HP_deg ?? pData?.inclination_deg ?? lineProps?.theta ?? 0) * Math.PI / 180;
-        let phi = (pData?.inclination_with_VP_deg ?? (type === 'line_inclined_VP' ? pData?.inclination_deg : 0) ?? lineProps?.phi ?? 0) * Math.PI / 180;
+        let theta = (pData?.inclination_with_HP_deg ?? pData?.inclination_deg ?? (lineProps as any)?.theta ?? 0) * Math.PI / 180;
+        let phi = (pData?.inclination_with_VP_deg ?? (type === 'line_inclined_VP' ? pData?.inclination_deg : 0) ?? (lineProps as any)?.phi ?? 0) * Math.PI / 180;
 
         if (type === 'line_parallel') {
             theta = 0;
@@ -800,13 +800,40 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
             };
         }
 
+        let basePts: Point3D[] = [];
+        let topPts: Point3D[] = [];
+        let apexPt: Point3D | null = null;
+
         const isMultiStage = restingOn === 'HP' && (hpTilt > 0.001 || vpTilt > 0.001) && !pData?.cutting_plane && type !== 'section_solid';
 
         if (isMultiStage) {
+            // Stage 1: Upright on HP
+            // Stage 2: Tilted around resting base edge to HP (in X-Y plane, parallel to VP)
+            // Resting edge is at x = +side/2, y = 0
+            const alpha = Math.PI / 2 - hpTilt;
+            const rotStage2 = (p: { x: number; y: number; z: number }) => {
+                const dx = p.x - (side / 2);
+                const dy = p.y;
+                // Rotate clockwise by -alpha around (side/2, 0)
+                const rx = dx * Math.cos(alpha) + dy * Math.sin(alpha) + (side / 2);
+                const ry = -dx * Math.sin(alpha) + dy * Math.cos(alpha);
+                return { x: rx, y: ry, z: p.z };
+            };
+
+            // Stage 3: Turned to VP by apparent angle beta
+            const sinBeta = Math.min(1.0, Math.sin(vpTilt) / Math.max(0.01, Math.cos(hpTilt)));
+            const beta = Math.asin(sinBeta);
+
+            const rotStage3 = (p: { x: number; y: number; z: number }) => {
+                const p2 = rotStage2(p);
+                const rx = p2.x * Math.cos(beta) - p2.z * Math.sin(beta);
+                const rz = p2.x * Math.sin(beta) + p2.z * Math.cos(beta);
+                return { x: rx, y: p2.y, z: rz };
+            };
+
             const buildSolidStage = (
                 stageStep: number,
-                rotFn: (p: { x: number; y: number; z: number }) => { x: number; y: number; z: number },
-                includeProjectors = false
+                rotFn: (p: { x: number; y: number; z: number }) => { x: number; y: number; z: number }
             ) => {
                 const sRotBase = rawBase.map(rotFn);
                 const sRotTop = rawTop.map(rotFn);
@@ -816,8 +843,8 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
 
                 const sAllRot = [...sRotBase, ...sRotTop, ...(sRotApex ? [sRotApex] : [])];
                 const sMinY = Math.min(...sAllRot.map(p => p.y));
-                const sShiftY = -sMinY;
-                const sShiftZ = 40;
+                const sShiftY = -sMinY; // Ensure resting edge is on HP
+                const sShiftZ = 45;      // Depth in front of VP
 
                 const sBasePts: Point3D[] = sRotBase.map((p, i) => ({
                     id: `stg${stageStep}_b${i}`,
@@ -881,97 +908,167 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
                         addSegment(sTopPts[i], sTopPts[(i + 1) % numSides], 'stage', 'solid', '#004d40', stageStep);
                         addSegment(sBasePts[i], sTopPts[i], 'stage', 'solid', '#004d40', stageStep);
                     }
+
+                    // Shaded translucent faces for the solid
+                    polygons.push({
+                        id: `stg${stageStep}_base_face`,
+                        points: sBasePts,
+                        color: '#0284c7',
+                        opacity: 0.22,
+                        role: 'face',
+                        step: stageStep,
+                    });
+                    polygons.push({
+                        id: `stg${stageStep}_top_face`,
+                        points: sTopPts,
+                        color: '#0284c7',
+                        opacity: 0.22,
+                        role: 'face',
+                        step: stageStep,
+                    });
+                    for (let i = 0; i < numSides; i++) {
+                        polygons.push({
+                            id: `stg${stageStep}_side_face_${i}`,
+                            points: [sBasePts[i], sBasePts[(i + 1) % numSides], sTopPts[(i + 1) % numSides], sTopPts[i]],
+                            color: '#38bdf8',
+                            opacity: 0.14,
+                            role: 'face',
+                            step: stageStep,
+                        });
+                    }
                 } else if (sApexPt) {
                     for (let i = 0; i < numSides; i++) {
                         addSegment(sBasePts[i], sApexPt, 'stage', 'solid', '#004d40', stageStep);
+                        polygons.push({
+                            id: `stg${stageStep}_tri_face_${i}`,
+                            points: [sBasePts[i], sBasePts[(i + 1) % numSides], sApexPt],
+                            color: '#38bdf8',
+                            opacity: 0.16,
+                            role: 'face',
+                            step: stageStep,
+                        });
                     }
                 }
 
                 addSegment(sAxisBase, sAxisTop, 'axis', 'chain', '#dc2626', stageStep);
 
-                if (includeProjectors) {
-                    const tvBasePts: Point3D[] = [];
-                    const tvTopPts: Point3D[] = [];
-                    const fvBasePts: Point3D[] = [];
-                    const fvTopPts: Point3D[] = [];
-
-                    sBasePts.forEach(v => {
-                        const hpFoot: Point3D = { id: `${v.id}_tv`, label: v.label.toLowerCase(), x: v.x, y: 0, z: v.z, step: stageStep, role: 'projection' };
-                        const vpFoot: Point3D = { id: `${v.id}_fv`, label: `${v.label.toLowerCase()}'`, x: v.x, y: v.y, z: 0, step: stageStep, role: 'projection' };
-                        points.push(hpFoot, vpFoot);
-                        tvBasePts.push(hpFoot);
-                        fvBasePts.push(vpFoot);
-                        addSegment(v, hpFoot, 'projector', 'dashed', '#cbd5e1', stageStep);
-                        addSegment(v, vpFoot, 'projector', 'dashed', '#cbd5e1', stageStep);
-                    });
-
-                    sTopPts.forEach(v => {
-                        const hpFoot: Point3D = { id: `${v.id}_tv`, label: v.label.toLowerCase(), x: v.x, y: 0, z: v.z, step: stageStep, role: 'projection' };
-                        const vpFoot: Point3D = { id: `${v.id}_fv`, label: `${v.label.toLowerCase()}'`, x: v.x, y: v.y, z: 0, step: stageStep, role: 'projection' };
-                        points.push(hpFoot, vpFoot);
-                        tvTopPts.push(hpFoot);
-                        fvTopPts.push(vpFoot);
-                        addSegment(v, hpFoot, 'projector', 'dashed', '#cbd5e1', stageStep);
-                        addSegment(v, vpFoot, 'projector', 'dashed', '#cbd5e1', stageStep);
-                    });
-
-                    for (let i = 0; i < numSides; i++) {
-                        addSegment(tvBasePts[i], tvBasePts[(i + 1) % numSides], 'object', 'solid', '#00796b', stageStep);
-                        addSegment(fvBasePts[i], fvBasePts[(i + 1) % numSides], 'object', 'solid', '#00796b', stageStep);
-                        if (isPrism) {
-                            addSegment(tvTopPts[i], tvTopPts[(i + 1) % numSides], 'object', 'solid', '#00796b', stageStep);
-                            addSegment(tvBasePts[i], tvTopPts[i], 'object', 'solid', '#00796b', stageStep);
-                            addSegment(fvTopPts[i], fvTopPts[(i + 1) % numSides], 'object', 'solid', '#00796b', stageStep);
-                            addSegment(fvBasePts[i], fvTopPts[i], 'object', 'solid', '#00796b', stageStep);
-                        }
-                    }
-                }
-
-                return { sAxisBase, sAxisTop };
+                return { sBasePts, sTopPts, sApexPt, sAxisBase, sAxisTop };
             };
 
             // Stage 1: Simple Upright Position
-            buildSolidStage(1, p => p);
+            const stg1 = buildSolidStage(1, p => p);
+            basePts = stg1.sBasePts;
+            topPts = stg1.sTopPts;
+            apexPt = stg1.sApexPt;
 
-            // Stage 2: Tilted around resting edge to HP
-            const tiltAngle = Math.PI / 2 - hpTilt;
-            const rotStage2 = (p: { x: number; y: number; z: number }) => ({
-                x: p.x,
-                y: p.y * Math.cos(tiltAngle) - p.z * Math.sin(tiltAngle),
-                z: p.y * Math.sin(tiltAngle) + p.z * Math.cos(tiltAngle)
-            });
-            const stg2Axes = buildSolidStage(2, rotStage2);
+            // Stage 2: Tilted to HP
+            const stg2 = buildSolidStage(2, rotStage2);
 
             angleAnnotations.push({
-                origin: stg2Axes.sAxisBase,
-                dirBase: { x: stg2Axes.sAxisTop.x - stg2Axes.sAxisBase.x, y: 0, z: stg2Axes.sAxisTop.z - stg2Axes.sAxisBase.z },
-                dirInclined: { x: stg2Axes.sAxisTop.x - stg2Axes.sAxisBase.x, y: stg2Axes.sAxisTop.y - stg2Axes.sAxisBase.y, z: stg2Axes.sAxisTop.z - stg2Axes.sAxisBase.z },
-                radius: 24,
+                origin: stg2.sAxisBase,
+                dirBase: { x: 1, y: 0, z: 0 },
+                dirInclined: { x: stg2.sAxisTop.x - stg2.sAxisBase.x, y: stg2.sAxisTop.y - stg2.sAxisBase.y, z: 0 },
+                radius: 26,
                 label: `θ=${Math.round(hpTiltDeg)}° to HP`,
                 plane: 'HP',
                 step: 2,
             });
 
-            // Stage 3: Turned with VP
-            const stg3Axes = buildSolidStage(3, rotatePt);
+            // Stage 3: Turned to VP
+            const stg3 = buildSolidStage(3, rotStage3);
 
             angleAnnotations.push({
-                origin: stg3Axes.sAxisBase,
-                dirBase: { x: stg3Axes.sAxisTop.x - stg3Axes.sAxisBase.x, y: stg3Axes.sAxisTop.y - stg3Axes.sAxisBase.y, z: 0 },
-                dirInclined: { x: stg3Axes.sAxisTop.x - stg3Axes.sAxisBase.x, y: stg3Axes.sAxisTop.y - stg3Axes.sAxisBase.y, z: stg3Axes.sAxisTop.z - stg3Axes.sAxisBase.z },
-                radius: 24,
+                origin: stg3.sAxisBase,
+                dirBase: { x: stg3.sAxisTop.x - stg3.sAxisBase.x, y: 0, z: stg3.sAxisTop.z - stg3.sAxisBase.z },
+                dirInclined: { x: stg3.sAxisTop.x - stg3.sAxisBase.x, y: stg3.sAxisTop.y - stg3.sAxisBase.y, z: stg3.sAxisTop.z - stg3.sAxisBase.z },
+                radius: 26,
                 label: `φ=${Math.round(vpTiltDeg)}° to VP`,
                 plane: 'VP',
                 step: 3,
             });
 
-            // Stage 4: Orthographic Projections
-            buildSolidStage(4, rotatePt, true);
+            // Stage 4: Orthographic Projections (Derived cleanly from Stage 3 solid)
+            const stg4Base = stg3.sBasePts;
+            const stg4Top = stg3.sTopPts;
+            const allSolidPts = [...stg4Base, ...stg4Top, ...(stg3.sApexPt ? [stg3.sApexPt] : [])];
+
+            const tvPoints: Point3D[] = [];
+            const fvPoints: Point3D[] = [];
+
+            allSolidPts.forEach(v => {
+                const hpFoot: Point3D = { id: `${v.id}_tv4`, label: v.label.toLowerCase(), x: v.x, y: 0, z: v.z, step: 4, role: 'projection' };
+                const vpFoot: Point3D = { id: `${v.id}_fv4`, label: `${v.label.toLowerCase()}'`, x: v.x, y: v.y, z: 0, step: 4, role: 'projection' };
+                points.push(hpFoot, vpFoot);
+                tvPoints.push(hpFoot);
+                fvPoints.push(vpFoot);
+
+                // Dashed orthogonal projectors
+                addSegment(v, hpFoot, 'projector', 'dashed', '#94a3b8', 4);
+                addSegment(v, vpFoot, 'projector', 'dashed', '#94a3b8', 4);
+            });
+
+            // Top View outline on HP
+            const tvBase = tvPoints.slice(0, numSides);
+            const tvTop = isPrism ? tvPoints.slice(numSides, numSides * 2) : [];
+            for (let i = 0; i < numSides; i++) {
+                addSegment(tvBase[i], tvBase[(i + 1) % numSides], 'object', 'solid', '#00796b', 4);
+                if (isPrism && tvTop.length > 0) {
+                    addSegment(tvTop[i], tvTop[(i + 1) % numSides], 'object', 'solid', '#00796b', 4);
+                    addSegment(tvBase[i], tvTop[i], 'object', 'solid', '#00796b', 4);
+                }
+            }
+
+            // Front View outline on VP
+            const fvBase = fvPoints.slice(0, numSides);
+            const fvTop = isPrism ? fvPoints.slice(numSides, numSides * 2) : [];
+            for (let i = 0; i < numSides; i++) {
+                addSegment(fvBase[i], fvBase[(i + 1) % numSides], 'object', 'solid', '#00796b', 4);
+                if (isPrism && fvTop.length > 0) {
+                    addSegment(fvTop[i], fvTop[(i + 1) % numSides], 'object', 'solid', '#00796b', 4);
+                    addSegment(fvBase[i], fvTop[i], 'object', 'solid', '#00796b', 4);
+                }
+            }
+
+            // Translucent projection faces on HP and VP
+            if (isPrism) {
+                polygons.push({
+                    id: 'stg4_tv_face_base',
+                    points: tvBase,
+                    color: '#0d9488',
+                    opacity: 0.28,
+                    role: 'face',
+                    step: 4,
+                });
+                polygons.push({
+                    id: 'stg4_tv_face_top',
+                    points: tvTop,
+                    color: '#0d9488',
+                    opacity: 0.28,
+                    role: 'face',
+                    step: 4,
+                });
+                polygons.push({
+                    id: 'stg4_fv_face_base',
+                    points: fvBase,
+                    color: '#0d9488',
+                    opacity: 0.28,
+                    role: 'face',
+                    step: 4,
+                });
+                polygons.push({
+                    id: 'stg4_fv_face_top',
+                    points: fvTop,
+                    color: '#0d9488',
+                    opacity: 0.28,
+                    role: 'face',
+                    step: 4,
+                });
+            }
 
             stepsInfo.push(
-                { step: 1, title: 'Stage 1: Simple Upright Position', description: 'Solid rests on its base on HP with axis perpendicular to HP and parallel to VP.' },
-                { step: 2, title: `Stage 2: Axis Inclination to HP (${Math.round(hpTiltDeg)}°)`, description: `Tilt the solid around its resting base edge so its axis makes ${Math.round(hpTiltDeg)}° with HP.` },
-                { step: 3, title: `Stage 3: Axis Inclination to VP (${Math.round(vpTiltDeg)}°)`, description: `Rotate the solid in 3D space so its axis makes ${Math.round(vpTiltDeg)}° with VP.` },
+                { step: 1, title: 'Stage 1: Simple Upright Position', description: 'Prism rests on HP on its base; axis is perpendicular to HP and parallel to VP.' },
+                { step: 2, title: `Stage 2: Axis Inclination to HP (${Math.round(hpTiltDeg)}°)`, description: `Tilt the prism around resting base edge so axis makes ${Math.round(hpTiltDeg)}° with HP, remaining parallel to VP.` },
+                { step: 3, title: `Stage 3: Axis Inclination to VP (${Math.round(vpTiltDeg)}°)`, description: `Rotate solid in 3D space so axis makes ${Math.round(vpTiltDeg)}° with VP while preserving HP tilt.` },
                 { step: 4, title: 'Stage 4: Orthographic Projections (TV & FV)', description: 'Drop orthogonal projectors from all 3D vertices to cast Top View on HP and Front View on VP.' }
             );
         } else {
@@ -988,7 +1085,7 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
             const shiftY = restingOn === 'HP' ? -minY : 32 - minY;
             const shiftZ = restingOn === 'HP' ? 38 - minZ : -minZ;
 
-            const basePts: Point3D[] = rotBase.map((p, i) => ({
+            basePts = rotBase.map((p, i) => ({
                 id: `b${i}`,
                 label: String.fromCharCode(97 + i),
                 x: p.x,
@@ -997,7 +1094,7 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
                 step: 1
             }));
 
-            const topPts: Point3D[] = rotTop.map((p, i) => ({
+            topPts = rotTop.map((p, i) => ({
                 id: `t${i}`,
                 label: `${String.fromCharCode(97 + i)}'`,
                 x: p.x,
@@ -1006,7 +1103,7 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
                 step: 1
             }));
 
-            const apexPt: Point3D | null = rotApex ? {
+            apexPt = rotApex ? {
                 id: 'apex',
                 label: "o'",
                 x: rotApex.x,

@@ -14,6 +14,8 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
     const containerRef = useRef<HTMLDivElement>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
     const controlsRef = useRef<OrbitControls | null>(null);
+    const sceneRef = useRef<THREE.Scene | null>(null);
+    const stepGroupRef = useRef<THREE.Group | null>(null);
     const setViewAngleRef = useRef<((view: 'front' | 'top' | 'isometric' | 'side') => void) | null>(null);
 
     const [sceneData, setSceneData] = useState<Scene3DData | null>(null);
@@ -43,20 +45,21 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
         return () => clearInterval(interval);
     }, [isPlaying, sceneData]);
 
+    // 1. Static Scene & Renderer Setup (Runs once on mount or planeSize/mode change)
     useEffect(() => {
         const container = containerRef.current;
         if (!container || !sceneData) return;
 
-        const { mode, points, segments, polygons, dimensions, angleAnnotations, planeSize } = sceneData;
+        const { mode, planeSize } = sceneData;
 
-        // 1. Scene setup
         const scene = new THREE.Scene();
         scene.background = new THREE.Color('#fafafa');
+        sceneRef.current = scene;
 
         const width = container.clientWidth || 800;
         const height = container.clientHeight || 600;
 
-        // 2. Camera setup
+        // Camera setup
         const camera = new THREE.PerspectiveCamera(45, width / Math.max(height, 1), 1, 4000);
         const d = planeSize * 1.35;
         if (mode === 'perspective') {
@@ -68,13 +71,13 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
         }
         cameraRef.current = camera;
 
-        // 3. WebGL Renderer
+        // WebGL Renderer
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         renderer.setSize(width, height);
         container.appendChild(renderer.domElement);
 
-        // 4. CSS2D Label Renderer
+        // CSS2D Label Renderer
         const labelRenderer = new CSS2DRenderer();
         labelRenderer.setSize(width, height);
         labelRenderer.domElement.style.position = 'absolute';
@@ -83,14 +86,14 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
         labelRenderer.domElement.style.pointerEvents = 'none';
         container.appendChild(labelRenderer.domElement);
 
-        // 5. Orbit Controls
+        // Orbit Controls
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.08;
         controls.target.set(0, planeSize * 0.2, mode === 'perspective' ? 0 : planeSize * 0.2);
         controlsRef.current = controls;
 
-        // 6. Lighting
+        // Lighting
         const ambientLight = new THREE.AmbientLight(0xffffff, 2.2);
         scene.add(ambientLight);
         const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -100,7 +103,9 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
         dirLight2.position.set(-planeSize * 1.5, -planeSize, -planeSize * 1.5);
         scene.add(dirLight2);
 
-        // Helper for CSS2D Text Labels
+        // Reference Planes Setup
+        const halfSize = planeSize;
+
         const createLabel = (text: string, className = 'plane-label') => {
             const div = document.createElement('div');
             div.className = `three-label ${className}`;
@@ -117,11 +122,7 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
             return new CSS2DObject(div);
         };
 
-        // 7. Reference Planes Setup
-        const halfSize = planeSize;
-
         if (mode === 'perspective') {
-            // Ground Plane (GP) extending in front and behind PP: y = 0, z from -halfSize/2 to +halfSize/2
             const gpGeo = new THREE.PlaneGeometry(halfSize * 1.2, halfSize * 1.4);
             const gpMat = new THREE.MeshBasicMaterial({
                 color: 0xffffff,
@@ -143,7 +144,6 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
             gpBadge.position.set(-halfSize * 0.45, 0.2, halfSize * 0.55);
             scene.add(gpBadge);
 
-            // Picture Plane (PP) at z = 0, extending upwards (y >= 0)
             const ppGeo = new THREE.PlaneGeometry(halfSize * 1.1, halfSize * 0.85);
             const ppMat = new THREE.MeshBasicMaterial({
                 color: 0xdbeafe,
@@ -166,7 +166,7 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
             ppBadge.position.set(-halfSize * 0.45, halfSize * 0.8, 0.2);
             scene.add(ppBadge);
         } else {
-            // HP Plane (X-Z plane, y = 0)
+            // HP Plane
             const hpGeo = new THREE.PlaneGeometry(halfSize, halfSize);
             const hpMat = new THREE.MeshBasicMaterial({
                 color: 0xffffff,
@@ -191,7 +191,7 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
             hpGrid.position.set(0, 0.05, halfSize / 2);
             scene.add(hpGrid);
 
-            // VP Plane (X-Y plane, z = 0)
+            // VP Plane
             const vpGeo = new THREE.PlaneGeometry(halfSize, halfSize);
             const vpMat = new THREE.MeshBasicMaterial({
                 color: 0xffffff,
@@ -242,198 +242,12 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
             scene.add(vpBadge);
         }
 
-        // 8. Filter and Render 3D Elements based on currentStep
-        // Segments
-        segments
-            .filter((s) => (s.step || 1) <= currentStep)
-            .forEach((seg) => {
-                const isPastStage = seg.role === 'stage' && (seg.step || 1) < currentStep;
-                const pts = [
-                    new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z),
-                    new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z),
-                ];
-                const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        // Dedicated Group for dynamic step elements
+        const stepGroup = new THREE.Group();
+        scene.add(stepGroup);
+        stepGroupRef.current = stepGroup;
 
-                if (isPastStage) {
-                    const lineMat = new THREE.LineDashedMaterial({
-                        color: new THREE.Color('#cbd5e1'),
-                        dashSize: 2.5,
-                        gapSize: 2,
-                        linewidth: 1,
-                    });
-                    const line = new THREE.Line(geo, lineMat);
-                    line.computeLineDistances();
-                    scene.add(line);
-                    return;
-                }
-
-                if (seg.style === 'dashed' || seg.role === 'projector' || seg.role === 'visual_ray') {
-                    const lineMat = new THREE.LineDashedMaterial({
-                        color: new THREE.Color(seg.color || '#94a3b8'),
-                        dashSize: seg.role === 'visual_ray' ? 3.5 : 2.5,
-                        gapSize: seg.role === 'visual_ray' ? 2 : 1.5,
-                        linewidth: seg.role === 'visual_ray' ? 1.5 : 1.2,
-                    });
-                    const line = new THREE.Line(geo, lineMat);
-                    line.computeLineDistances();
-                    scene.add(line);
-                } else if (seg.role === 'axis' || seg.role === 'horizon') {
-                    const lineMat = new THREE.LineDashedMaterial({
-                        color: new THREE.Color(seg.color || '#dc2626'),
-                        dashSize: 6,
-                        gapSize: 2,
-                        linewidth: 2,
-                    });
-                    const line = new THREE.Line(geo, lineMat);
-                    line.computeLineDistances();
-                    scene.add(line);
-                } else if (seg.role === 'cutting_plane') {
-                    const lineMat = new THREE.LineDashedMaterial({
-                        color: new THREE.Color(seg.color || '#dc2626'),
-                        dashSize: 5,
-                        gapSize: 2,
-                        linewidth: 2,
-                    });
-                    const line = new THREE.Line(geo, lineMat);
-                    line.computeLineDistances();
-                    scene.add(line);
-                } else if (seg.role === 'section') {
-                    const lineMat = new THREE.LineBasicMaterial({
-                        color: new THREE.Color(seg.color || '#b91c1c'),
-                        linewidth: 3,
-                    });
-                    const line = new THREE.Line(geo, lineMat);
-                    scene.add(line);
-                } else {
-                    const lineMat = new THREE.LineBasicMaterial({
-                        color: new THREE.Color(seg.color || '#004d40'),
-                        linewidth: 2.5,
-                    });
-                    const line = new THREE.Line(geo, lineMat);
-                    scene.add(line);
-                }
-            });
-
-        // Points & Markers
-        const sphereGeo = new THREE.SphereGeometry(1.6, 16, 16);
-        const sphereMat = new THREE.MeshStandardMaterial({
-            color: 0x004d40,
-            roughness: 0.3,
-            metalness: 0.2,
-        });
-
-        const spSphereGeo = new THREE.SphereGeometry(3.0, 16, 16);
-        const spSphereMat = new THREE.MeshStandardMaterial({
-            color: 0xdc2626,
-            roughness: 0.2,
-            metalness: 0.3,
-        });
-
-        const pierceSphereGeo = new THREE.SphereGeometry(2.0, 16, 16);
-        const pierceSphereMat = new THREE.MeshStandardMaterial({
-            color: 0xb91c1c,
-            roughness: 0.2,
-            metalness: 0.3,
-        });
-
-        points
-            .filter((p) => (p.role === 'stage' ? (p.step || 1) === currentStep : (p.step || 1) <= currentStep))
-            .forEach((p) => {
-                const isStation = p.role === 'station';
-                const isPiercing = p.role === 'piercing';
-                const marker = new THREE.Mesh(
-                    isStation ? spSphereGeo : isPiercing ? pierceSphereGeo : sphereGeo,
-                    isStation ? spSphereMat : isPiercing ? pierceSphereMat : sphereMat
-                );
-                marker.position.set(p.x, p.y, p.z);
-                scene.add(marker);
-
-                if (p.label) {
-                    const labelObj = createLabel(p.label, isStation ? 'station-label' : isPiercing ? 'pierce-label' : 'vertex-label');
-                    labelObj.position.set(p.x, p.y + (isStation ? 4 : 2.5), p.z);
-                    scene.add(labelObj);
-                }
-            });
-
-        // 3D Polygons (Cutting planes, Section surfaces, Laminas, Picture Plane)
-        polygons
-            .filter((poly) => (poly.step || 1) <= currentStep)
-            .forEach((poly) => {
-                if (poly.points.length < 3) return;
-
-                const p0 = poly.points[0];
-                const vertices: THREE.Vector3[] = [];
-                for (let i = 1; i < poly.points.length - 1; i++) {
-                    const p1 = poly.points[i];
-                    const p2 = poly.points[i + 1];
-                    vertices.push(new THREE.Vector3(p0.x, p0.y, p0.z));
-                    vertices.push(new THREE.Vector3(p1.x, p1.y, p1.z));
-                    vertices.push(new THREE.Vector3(p2.x, p2.y, p2.z));
-                }
-
-                const geo = new THREE.BufferGeometry().setFromPoints(vertices);
-                geo.computeVertexNormals();
-
-                const mat = new THREE.MeshStandardMaterial({
-                    color: new THREE.Color(poly.color),
-                    side: THREE.DoubleSide,
-                    transparent: true,
-                    opacity: poly.opacity,
-                    depthWrite: false,
-                });
-                const mesh = new THREE.Mesh(geo, mat);
-                scene.add(mesh);
-
-                if (poly.label) {
-                    const cx = poly.points.reduce((sum, p) => sum + p.x, 0) / poly.points.length;
-                    const cy = poly.points.reduce((sum, p) => sum + p.y, 0) / poly.points.length;
-                    const cz = poly.points.reduce((sum, p) => sum + p.z, 0) / poly.points.length;
-                    const polyLabel = createLabel(poly.label, 'section-label');
-                    polyLabel.position.set(cx, cy + 3, cz);
-                    scene.add(polyLabel);
-                }
-            });
-
-        // Dimensions in 3D
-        dimensions
-            .filter((dim) => (dim.step || 1) <= currentStep)
-            .forEach((dim) => {
-                const midX = (dim.p1.x + dim.p2.x) / 2;
-                const midY = (dim.p1.y + dim.p2.y) / 2;
-                const midZ = (dim.p1.z + dim.p2.z) / 2;
-
-                const dimLabel = createLabel(dim.label, 'dimension-label');
-                dimLabel.position.set(midX, midY + 3, midZ);
-                scene.add(dimLabel);
-            });
-
-        // Angle Annotations in 3D
-        angleAnnotations
-            .filter((ann) => (ann.step || 1) <= currentStep)
-            .forEach((ann) => {
-                const arcGeo = new THREE.BufferGeometry();
-                const arcPts: THREE.Vector3[] = [];
-                const steps = 18;
-                const v1 = new THREE.Vector3(ann.dirBase.x, ann.dirBase.y, ann.dirBase.z).normalize();
-                const v2 = new THREE.Vector3(ann.dirInclined.x, ann.dirInclined.y, ann.dirInclined.z).normalize();
-
-                for (let i = 0; i <= steps; i++) {
-                    const t = i / steps;
-                    const v = new THREE.Vector3().lerpVectors(v1, v2, t).normalize().multiplyScalar(ann.radius);
-                    arcPts.push(new THREE.Vector3(ann.origin.x + v.x, ann.origin.y + v.y, ann.origin.z + v.z));
-                }
-                arcGeo.setFromPoints(arcPts);
-                const arcMat = new THREE.LineBasicMaterial({ color: 0x2563eb, linewidth: 2 });
-                const arcLine = new THREE.Line(arcGeo, arcMat);
-                scene.add(arcLine);
-
-                const midPt = arcPts[Math.floor(steps / 2)];
-                const textLabel = createLabel(ann.label, 'angle-label');
-                textLabel.position.set(midPt.x, midPt.y + 2, midPt.z);
-                scene.add(textLabel);
-            });
-
-        // 9. Camera Align View Transitions
+        // View Alignment
         let animFrameId: number;
         const setViewAngle = (view: 'front' | 'top' | 'isometric' | 'side') => {
             const target = controls.target;
@@ -476,10 +290,9 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
             cancelAnimationFrame(animFrameId);
             animFrameId = requestAnimationFrame(animateCam);
         };
-
         setViewAngleRef.current = setViewAngle;
 
-        // 10. Resize Observer
+        // Resize Observer
         const resizeObserver = new ResizeObserver(() => {
             if (!container) return;
             const newW = container.clientWidth;
@@ -491,7 +304,7 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
         });
         resizeObserver.observe(container);
 
-        // 11. Render Loop
+        // Animation Loop
         let frameId: number;
         const animate = () => {
             controls.update();
@@ -509,6 +322,249 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
             renderer.dispose();
             container.innerHTML = '';
         };
+    }, [sceneData?.mode, sceneData?.planeSize]);
+
+    // 2. Dynamic Step Updates (Updates geometry smoothly without resetting camera/controls)
+    useEffect(() => {
+        const stepGroup = stepGroupRef.current;
+        if (!stepGroup || !sceneData) return;
+
+        // Clean up previous step objects and CSS2D labels
+        while (stepGroup.children.length > 0) {
+            const obj = stepGroup.children[0];
+            stepGroup.remove(obj);
+            if ((obj as any).element && (obj as any).element.parentNode) {
+                (obj as any).element.parentNode.removeChild((obj as any).element);
+            }
+            if ((obj as any).geometry) (obj as any).geometry.dispose();
+            if ((obj as any).material) {
+                if (Array.isArray((obj as any).material)) {
+                    (obj as any).material.forEach((m: any) => m.dispose());
+                } else {
+                    (obj as any).material.dispose();
+                }
+            }
+        }
+
+        const { points, segments, polygons, dimensions, angleAnnotations } = sceneData;
+
+        const createStepLabel = (text: string, className = 'vertex-label') => {
+            const div = document.createElement('div');
+            div.className = `three-label ${className}`;
+            div.textContent = text;
+            div.style.color = className.includes('dimension') ? '#4338ca' : className.includes('station') ? '#c62828' : '#0f172a';
+            div.style.fontFamily = 'Geist Mono, monospace';
+            div.style.fontSize = '11px';
+            div.style.fontWeight = 'bold';
+            div.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+            div.style.padding = '2px 5px';
+            div.style.borderRadius = '3px';
+            div.style.border = '1px solid rgba(15, 23, 42, 0.18)';
+            div.style.whiteSpace = 'nowrap';
+            return new CSS2DObject(div);
+        };
+
+        const activeStage = currentStep === 4 ? 3 : currentStep;
+
+        // Filter and add Segments
+        segments.forEach((seg) => {
+            const isStageRole = seg.role === 'stage';
+            const isAxisRole = seg.role === 'axis';
+
+            if (isStageRole || isAxisRole) {
+                if ((seg.step || 1) !== activeStage) return;
+            } else {
+                if ((seg.step || 1) !== currentStep && (seg.step || 1) > currentStep) return;
+            }
+
+            const pts = [
+                new THREE.Vector3(seg.start.x, seg.start.y, seg.start.z),
+                new THREE.Vector3(seg.end.x, seg.end.y, seg.end.z),
+            ];
+            const geo = new THREE.BufferGeometry().setFromPoints(pts);
+
+            if (seg.style === 'dashed' || seg.role === 'projector' || seg.role === 'visual_ray') {
+                const lineMat = new THREE.LineDashedMaterial({
+                    color: new THREE.Color(seg.color || '#94a3b8'),
+                    dashSize: seg.role === 'visual_ray' ? 3.5 : 2.5,
+                    gapSize: seg.role === 'visual_ray' ? 2 : 1.5,
+                    linewidth: seg.role === 'visual_ray' ? 1.5 : 1.2,
+                });
+                const line = new THREE.Line(geo, lineMat);
+                line.computeLineDistances();
+                stepGroup.add(line);
+            } else if (seg.role === 'axis' || seg.role === 'horizon') {
+                const lineMat = new THREE.LineDashedMaterial({
+                    color: new THREE.Color(seg.color || '#dc2626'),
+                    dashSize: 6,
+                    gapSize: 2,
+                    linewidth: 2,
+                });
+                const line = new THREE.Line(geo, lineMat);
+                line.computeLineDistances();
+                stepGroup.add(line);
+            } else if (seg.role === 'cutting_plane') {
+                const lineMat = new THREE.LineDashedMaterial({
+                    color: new THREE.Color(seg.color || '#dc2626'),
+                    dashSize: 5,
+                    gapSize: 2,
+                    linewidth: 2,
+                });
+                const line = new THREE.Line(geo, lineMat);
+                line.computeLineDistances();
+                stepGroup.add(line);
+            } else if (seg.role === 'section') {
+                const lineMat = new THREE.LineBasicMaterial({
+                    color: new THREE.Color(seg.color || '#b91c1c'),
+                    linewidth: 3,
+                });
+                const line = new THREE.Line(geo, lineMat);
+                stepGroup.add(line);
+            } else {
+                const lineMat = new THREE.LineBasicMaterial({
+                    color: new THREE.Color(seg.color || '#004d40'),
+                    linewidth: 2.5,
+                });
+                const line = new THREE.Line(geo, lineMat);
+                stepGroup.add(line);
+            }
+        });
+
+        // Filter and add Points
+        const sphereGeo = new THREE.SphereGeometry(1.6, 16, 16);
+        const sphereMat = new THREE.MeshStandardMaterial({
+            color: 0x004d40,
+            roughness: 0.3,
+            metalness: 0.2,
+        });
+
+        const spSphereGeo = new THREE.SphereGeometry(3.0, 16, 16);
+        const spSphereMat = new THREE.MeshStandardMaterial({
+            color: 0xdc2626,
+            roughness: 0.2,
+            metalness: 0.3,
+        });
+
+        const pierceSphereGeo = new THREE.SphereGeometry(2.0, 16, 16);
+        const pierceSphereMat = new THREE.MeshStandardMaterial({
+            color: 0xb91c1c,
+            roughness: 0.2,
+            metalness: 0.3,
+        });
+
+        points.forEach((p) => {
+            const isStageRole = p.role === 'stage';
+            if (isStageRole) {
+                if ((p.step || 1) !== activeStage) return;
+            } else {
+                if ((p.step || 1) !== currentStep && (p.step || 1) > currentStep) return;
+            }
+
+            const isStation = p.role === 'station';
+            const isPiercing = p.role === 'piercing';
+            const marker = new THREE.Mesh(
+                isStation ? spSphereGeo : isPiercing ? pierceSphereGeo : sphereGeo,
+                isStation ? spSphereMat : isPiercing ? pierceSphereMat : sphereMat
+            );
+            marker.position.set(p.x, p.y, p.z);
+            stepGroup.add(marker);
+
+            if (p.label) {
+                const labelObj = createStepLabel(p.label, isStation ? 'station-label' : isPiercing ? 'pierce-label' : 'vertex-label');
+                labelObj.position.set(p.x, p.y + (isStation ? 4 : 2.5), p.z);
+                stepGroup.add(labelObj);
+            }
+        });
+
+        // Filter and add Polygons (Solid faces & projection footprints)
+        polygons.forEach((poly) => {
+            if (poly.points.length < 3) return;
+
+            if (poly.role === 'face') {
+                const isMatch = (poly.step || 1) === activeStage || (currentStep === 4 && poly.step === 4);
+                if (!isMatch) return;
+            } else {
+                if ((poly.step || 1) > currentStep) return;
+            }
+
+            const p0 = poly.points[0];
+            const vertices: THREE.Vector3[] = [];
+            for (let i = 1; i < poly.points.length - 1; i++) {
+                const p1 = poly.points[i];
+                const p2 = poly.points[i + 1];
+                vertices.push(new THREE.Vector3(p0.x, p0.y, p0.z));
+                vertices.push(new THREE.Vector3(p1.x, p1.y, p1.z));
+                vertices.push(new THREE.Vector3(p2.x, p2.y, p2.z));
+            }
+
+            const geo = new THREE.BufferGeometry().setFromPoints(vertices);
+            geo.computeVertexNormals();
+
+            const mat = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(poly.color),
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: poly.opacity,
+                depthWrite: false,
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            stepGroup.add(mesh);
+
+            if (poly.label) {
+                const cx = poly.points.reduce((sum, p) => sum + p.x, 0) / poly.points.length;
+                const cy = poly.points.reduce((sum, p) => sum + p.y, 0) / poly.points.length;
+                const cz = poly.points.reduce((sum, p) => sum + p.z, 0) / poly.points.length;
+                const polyLabel = createStepLabel(poly.label, 'section-label');
+                polyLabel.position.set(cx, cy + 3, cz);
+                stepGroup.add(polyLabel);
+            }
+        });
+
+        // Dimensions
+        dimensions
+            .filter((dim) => (dim.step || 1) <= currentStep)
+            .forEach((dim) => {
+                const midX = (dim.p1.x + dim.p2.x) / 2;
+                const midY = (dim.p1.y + dim.p2.y) / 2;
+                const midZ = (dim.p1.z + dim.p2.z) / 2;
+
+                const dimLabel = createStepLabel(dim.label, 'dimension-label');
+                dimLabel.position.set(midX, midY + 3, midZ);
+                stepGroup.add(dimLabel);
+            });
+
+        // Angle Annotations
+        angleAnnotations.forEach((ann) => {
+            const stepNum = ann.step || 1;
+            let showAngle = false;
+            if (currentStep === 2 && stepNum === 2) showAngle = true;
+            else if (currentStep === 3 && (stepNum === 2 || stepNum === 3)) showAngle = true;
+            else if (currentStep === 4 && (stepNum === 2 || stepNum === 3)) showAngle = true;
+            else if (stepNum <= currentStep && sceneData.maxStep <= 2) showAngle = true;
+
+            if (!showAngle) return;
+
+            const arcGeo = new THREE.BufferGeometry();
+            const arcPts: THREE.Vector3[] = [];
+            const steps = 18;
+            const v1 = new THREE.Vector3(ann.dirBase.x, ann.dirBase.y, ann.dirBase.z).normalize();
+            const v2 = new THREE.Vector3(ann.dirInclined.x, ann.dirInclined.y, ann.dirInclined.z).normalize();
+
+            for (let i = 0; i <= steps; i++) {
+                const t = i / steps;
+                const v = new THREE.Vector3().lerpVectors(v1, v2, t).normalize().multiplyScalar(ann.radius);
+                arcPts.push(new THREE.Vector3(ann.origin.x + v.x, ann.origin.y + v.y, ann.origin.z + v.z));
+            }
+            arcGeo.setFromPoints(arcPts);
+            const arcMat = new THREE.LineBasicMaterial({ color: 0x2563eb, linewidth: 2 });
+            const arcLine = new THREE.Line(arcGeo, arcMat);
+            stepGroup.add(arcLine);
+
+            const midPt = arcPts[Math.floor(steps / 2)];
+            const textLabel = createStepLabel(ann.label, 'angle-label');
+            textLabel.position.set(midPt.x, midPt.y + 2, midPt.z);
+            stepGroup.add(textLabel);
+        });
     }, [sceneData, currentStep]);
 
     const activeStepInfo = sceneData?.stepsInfo.find((s) => s.step === currentStep) || sceneData?.stepsInfo[0];
@@ -589,7 +645,12 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setIsPlaying((p) => !p)}
+                                    onClick={() => {
+                                        if (!isPlaying && currentStep >= (sceneData?.maxStep || 1)) {
+                                            setCurrentStep(1);
+                                        }
+                                        setIsPlaying((p) => !p);
+                                    }}
                                     className="px-2.5 py-1 text-xs font-semibold bg-[#0b57ff] hover:bg-[#0047d4] text-white cursor-pointer"
                                     title={isPlaying ? 'Pause Animation' : 'Play 3D Step Animation'}
                                 >
