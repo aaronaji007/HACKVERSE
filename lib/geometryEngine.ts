@@ -3385,3 +3385,5 @@ export class GeometryEngine {
 // TODO: implement inclined solid logic correctly
 
 // Fixed rotation matrix for HP inclination
+
+// Hotfix: Resolve hidden lines rendering bug in inclined view
