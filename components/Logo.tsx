@@ -1,16 +1,16 @@
 import React from 'react';
 
-export interface GrafeinLogoProps {
+export interface HackverseLogoProps {
   className?: string;
   variant?: 'white' | 'dark' | 'original' | 'auto';
   alt?: string;
 }
 
-export function GrafeinLogo({ 
+export function HackverseLogo({ 
   className = "w-8 h-8", 
   variant = 'auto', 
-  alt = "Grafein Logo" 
-}: GrafeinLogoProps) {
+  alt = "Hackverse Logo" 
+}: HackverseLogoProps) {
   const src = variant === 'white' 
     ? '/logo-white.png' 
     : variant === 'dark' 

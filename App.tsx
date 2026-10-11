@@ -327,8 +327,8 @@ export const App: React.FC = () => {
                         </div>
                     ) : !isLoading && !error ? (
                         <div className="empty-state">
-                            <img src="/logo-transparent.png" alt="Grafein Logo" className="empty-logo" />
-                            <p className="empty-title">Welcome to Grafein · grafein.in</p>
+                            <img src="/logo-transparent.png" alt="Hackverse Logo" className="empty-logo" />
+                            <p className="empty-title">Welcome to Hackverse — Computational Engineering Graphics</p>
                             <p className="empty-copy">Submit a prompt or choose an example above to generate projections with step-by-step engineering drawing instructions.</p>
                         </div>
                     ) : null}

@@ -586,33 +586,76 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
     else if (type === 'plane_surface') {
         const pData = params as any;
         const shape = pData?.shape || 'hexagon';
-        const numSides = shape === 'triangle' ? 3 : shape === 'square' || shape === 'rectangle' ? 4 : shape === 'pentagon' ? 5 : shape === 'hexagon' ? 6 : 24;
-        const side = pData?.size_mm?.side_mm || (pData?.size_mm?.length_mm || 30);
-        const radius = shape === 'circle' ? (pData?.size_mm?.diameter_mm || 40) / 2 : side / (2 * Math.sin(Math.PI / numSides));
+        const isRect = shape === 'rectangle' || shape === 'square';
+        const lengthMm = pData?.size_mm?.length_mm || pData?.size_mm?.side_mm || 40;
+        const breadthMm = pData?.size_mm?.breadth_mm || pData?.size_mm?.side_mm || 30;
 
-        const hpAngle = (pData?.orientation?.inclination_with_HP_deg || 0) * Math.PI / 180;
-        const vpAngle = (pData?.orientation?.inclination_with_VP_deg || 0) * Math.PI / 180;
+        const hpAngle = (pData?.orientation?.inclination_with_HP_deg ?? 0) * Math.PI / 180;
+        const vpAngle = (pData?.orientation?.inclination_with_VP_deg ?? 0) * Math.PI / 180;
 
         const vertices: Point3D[] = [];
         const tvVertices: Point3D[] = [];
         const fvVertices: Point3D[] = [];
 
-        for (let i = 0; i < numSides; i++) {
-            const a = i * 2 * Math.PI / numSides;
-            const u = radius * Math.cos(a);
-            const v = radius * Math.sin(a);
+        // Local 2D coordinates in lamina plane
+        const localPts: Array<{ u: number; v: number; label: string }> = [];
+        if (isRect) {
+            const hw = lengthMm / 2;
+            const hh = breadthMm / 2;
+            localPts.push(
+                { u: -hw, v: -hh, label: 'A' },
+                { u: hw, v: -hh, label: 'B' },
+                { u: hw, v: hh, label: 'C' },
+                { u: -hw, v: hh, label: 'D' }
+            );
+        } else {
+            const numSides = shape === 'triangle' ? 3 : shape === 'pentagon' ? 5 : shape === 'hexagon' ? 6 : 24;
+            const side = pData?.size_mm?.side_mm || 30;
+            const radius = shape === 'circle' ? (pData?.size_mm?.diameter_mm || 40) / 2 : side / (2 * Math.sin(Math.PI / numSides));
+            for (let i = 0; i < numSides; i++) {
+                const a = i * 2 * Math.PI / numSides;
+                localPts.push({
+                    u: radius * Math.cos(a),
+                    v: radius * Math.sin(a),
+                    label: String.fromCharCode(65 + i)
+                });
+            }
+        }
 
-            const x = u;
-            const y = 20 + (v * Math.sin(hpAngle));
-            const z = 25 + (v * Math.cos(hpAngle) * Math.cos(vpAngle));
-            const label = String.fromCharCode(65 + i);
+        // Orthonormal frame for lamina inclined at hpAngle to HP and vpAngle to VP:
+        // uDir along horizontal edge: lies in HP, inclined at vpAngle to VP
+        const uDir = { x: Math.cos(vpAngle), y: 0, z: Math.sin(vpAngle) };
+        // vDir perpendicular to uDir: tilted at hpAngle w.r.t HP
+        const vDir = {
+            x: -Math.cos(hpAngle) * Math.sin(vpAngle),
+            y: Math.sin(hpAngle),
+            z: Math.cos(hpAngle) * Math.cos(vpAngle)
+        };
 
-            const pt: Point3D = { id: `V${i}`, label, x, y: Math.max(0, y), z: Math.max(0, z), step: 1 };
+        const rawRotated = localPts.map(pt => ({
+            label: pt.label,
+            x: pt.u * uDir.x + pt.v * vDir.x,
+            y: pt.u * uDir.y + pt.v * vDir.y,
+            z: pt.u * uDir.z + pt.v * vDir.z
+        }));
+
+        const minY = Math.min(...rawRotated.map(p => p.y));
+
+        for (let i = 0; i < rawRotated.length; i++) {
+            const r = rawRotated[i];
+            const pt: Point3D = {
+                id: `V${i}`,
+                label: r.label,
+                x: r.x,
+                y: r.y - minY + (hpAngle >= Math.PI / 2 - 0.01 ? 0 : 5),
+                z: 32 + r.z,
+                step: 1
+            };
             vertices.push(pt);
             points.push(pt);
 
-            const ptTV: Point3D = { id: `v${i}_tv`, label: label.toLowerCase(), x: pt.x, y: 0, z: pt.z, step: 2, role: 'projection' };
-            const ptFV: Point3D = { id: `v${i}_fv`, label: `${label.toLowerCase()}'`, x: pt.x, y: pt.y, z: 0, step: 2, role: 'projection' };
+            const ptTV: Point3D = { id: `v${i}_tv`, label: r.label.toLowerCase(), x: pt.x, y: 0, z: pt.z, step: 2, role: 'projection' };
+            const ptFV: Point3D = { id: `v${i}_fv`, label: `${r.label.toLowerCase()}'`, x: pt.x, y: pt.y, z: 0, step: 2, role: 'projection' };
             tvVertices.push(ptTV);
             fvVertices.push(ptFV);
             points.push(ptTV, ptFV);
@@ -631,20 +674,32 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
             label: `${shape.toUpperCase()} LAMINA`,
         });
 
-        for (let i = 0; i < numSides; i++) {
-            addSegment(vertices[i], vertices[(i + 1) % numSides], 'object', 'solid', '#004d40', 1);
-            addSegment(tvVertices[i], tvVertices[(i + 1) % numSides], 'object', 'solid', '#00796b', 2);
-            addSegment(fvVertices[i], fvVertices[(i + 1) % numSides], 'object', 'solid', '#00796b', 2);
+        const nPts = vertices.length;
+        for (let i = 0; i < nPts; i++) {
+            addSegment(vertices[i], vertices[(i + 1) % nPts], 'object', 'solid', '#004d40', 1);
+            addSegment(tvVertices[i], tvVertices[(i + 1) % nPts], 'object', 'solid', '#00796b', 2);
+            addSegment(fvVertices[i], fvVertices[(i + 1) % nPts], 'object', 'solid', '#00796b', 2);
         }
 
-        if (hpAngle > 0.01) {
+        if (hpAngle > 0.01 && hpAngle < Math.PI / 2 - 0.01) {
             angleAnnotations.push({
                 origin: vertices[0],
                 dirBase: { x: 0, y: 0, z: 1 },
-                dirInclined: { x: 0, y: Math.sin(hpAngle), z: Math.cos(hpAngle) },
+                dirInclined: { x: vDir.x, y: vDir.y, z: vDir.z },
                 radius: 20,
                 label: `θ=${Math.round(hpAngle * 180 / Math.PI)}° to HP`,
                 plane: 'HP',
+                step: 3,
+            });
+        }
+        if (vpAngle > 0.01) {
+            angleAnnotations.push({
+                origin: vertices[0],
+                dirBase: { x: 1, y: 0, z: 0 },
+                dirInclined: { x: uDir.x, y: 0, z: uDir.z },
+                radius: 20,
+                label: `φ=${Math.round(vpAngle * 180 / Math.PI)}° to VP`,
+                plane: 'VP',
                 step: 3,
             });
         }
@@ -668,83 +723,145 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
             ? 'square'
             : (solidType === 'cylinder' || solidType === 'cone' || solidType === 'sphere'
                 ? 'circle'
-                : (rawObj?.base_shape || pData?.base_shape || pData?.solids?.[0]?.base_shape || 'hexagon'));
+                : (rawObj?.base_shape || pData?.base_shape || pData?.solids?.[0]?.base_shape || 'square'));
         const numSides = shape === 'triangle' ? 3 : shape === 'square' || shape === 'rectangle' ? 4 : shape === 'pentagon' ? 5 : shape === 'hexagon' ? 6 : 24;
-        const side = rawObj?.base_size_mm?.side_mm || rawObj?.base_size_mm?.diameter_mm || pData?.base_size_mm?.side_mm || pData?.base_size_mm?.diameter_mm || (solidType === 'cube' ? 40 : 32);
+        const side = rawObj?.base_size_mm?.side_mm || rawObj?.base_size_mm?.diameter_mm || pData?.base_size_mm?.side_mm || pData?.base_size_mm?.diameter_mm || (solidType === 'cube' ? 40 : 35);
         const radius = shape === 'circle' ? side / 2 : side / (2 * Math.sin(Math.PI / numSides));
-        const height = (solidType === 'cube' ? side : (rawObj?.height_mm || pData?.height_mm || pData?.axis_length_mm || 65));
+        const height = (solidType === 'cube' ? side : (rawObj?.height_mm || pData?.height_mm || pData?.axis_length_mm || 60));
 
-        const hpTilt = (pData?.inclination_deg ?? pData?.inclination_with_HP_deg ?? 0) * Math.PI / 180;
         const restingOn = pData?.resting_on || 'HP';
+        const hpTiltDeg = pData?.inclination_with_HP_deg ?? (pData?.inclined_to === 'HP' ? pData?.inclination_deg : (pData?.base_inclination_deg !== undefined ? 90 - pData.base_inclination_deg : (pData?.inclination_deg ?? 0)));
+        const vpTiltDeg = pData?.inclination_with_VP_deg ?? (pData?.inclined_to === 'VP' ? pData?.inclination_deg : 0);
 
-        const basePts: Point3D[] = [];
-        const topPts: Point3D[] = [];
+        const hpTilt = hpTiltDeg * Math.PI / 180;
+        const vpTilt = vpTiltDeg * Math.PI / 180;
+
+        // Raw local unrotated coordinates: axis along +Y (from (0,0,0) to (0,height,0))
+        const rawBase: Array<{ x: number; y: number; z: number }> = [];
+        const rawTop: Array<{ x: number; y: number; z: number }> = [];
 
         for (let i = 0; i < numSides; i++) {
             const a = i * 2 * Math.PI / numSides - (shape === 'square' ? Math.PI / 4 : 0);
             const bx = radius * Math.cos(a);
             const bz = radius * Math.sin(a);
-
-            if (restingOn === 'HP') {
-                const rotY = Math.cos(hpTilt);
-                const rotZ = Math.sin(hpTilt);
-
-                basePts.push({
-                    id: `b${i}`,
-                    label: String.fromCharCode(97 + i),
-                    x: bx,
-                    y: 0,
-                    z: 32 + bz,
-                    step: 1,
-                });
-
-                if (isPrism) {
-                    topPts.push({
-                        id: `t${i}`,
-                        label: `${String.fromCharCode(97 + i)}'`,
-                        x: bx,
-                        y: height * rotY,
-                        z: 32 + bz + height * rotZ,
-                        step: 1,
-                    });
-                }
-            } else {
-                basePts.push({
-                    id: `b${i}`,
-                    label: String.fromCharCode(97 + i),
-                    x: bx,
-                    y: 32 + radius * Math.sin(a),
-                    z: 0,
-                    step: 1,
-                });
-                if (isPrism) {
-                    topPts.push({
-                        id: `t${i}`,
-                        label: `${String.fromCharCode(97 + i)}'`,
-                        x: bx,
-                        y: 32 + radius * Math.sin(a),
-                        z: height,
-                        step: 1,
-                    });
-                }
+            rawBase.push({ x: bx, y: 0, z: bz });
+            if (isPrism) {
+                rawTop.push({ x: bx, y: height, z: bz });
             }
         }
 
-        let apexPt: Point3D | null = null;
-        if (!isPrism) {
-            apexPt = {
-                id: 'apex',
-                label: "o'",
-                x: 0,
-                y: restingOn === 'HP' ? height * Math.cos(hpTilt) : 32,
-                z: restingOn === 'HP' ? 32 + height * Math.sin(hpTilt) : height,
-                step: 1,
+        const rawApex = !isPrism ? { x: 0, y: height, z: 0 } : null;
+        const rawAxB = { x: 0, y: 0, z: 0 };
+        const rawAxT = { x: 0, y: height, z: 0 };
+
+        // Rigid 3D Rodrigues rotation aligning vertical axis (0,1,0) to target axis vector
+        let rotatePt = (p: { x: number; y: number; z: number }) => p;
+
+        if (restingOn === 'HP') {
+            if (hpTilt > 0.001 || vpTilt > 0.001) {
+                const ay = Math.sin(hpTilt);
+                const az = Math.sin(vpTilt);
+                const ax = Math.sqrt(Math.max(0, 1 - ay * ay - az * az));
+
+                let kx = az;
+                let ky = 0;
+                let kz = -ax;
+                const kLen = Math.sqrt(kx * kx + kz * kz);
+                if (kLen > 1e-6) {
+                    kx /= kLen;
+                    kz /= kLen;
+                }
+
+                const cosG = ay;
+                const sinG = Math.sqrt(Math.max(0, 1 - cosG * cosG));
+
+                rotatePt = (p: { x: number; y: number; z: number }) => {
+                    const dot = kx * p.x + kz * p.z;
+                    const cx = -kz * p.y;
+                    const cy = kz * p.x - kx * p.z;
+                    const cz = kx * p.y;
+                    return {
+                        x: p.x * cosG + cx * sinG + kx * dot * (1 - cosG),
+                        y: p.y * cosG + cy * sinG + ky * dot * (1 - cosG),
+                        z: p.z * cosG + cz * sinG + kz * dot * (1 - cosG),
+                    };
+                };
+            }
+        } else {
+            // Resting on VP: axis along +Z, rotated
+            rotatePt = (p: { x: number; y: number; z: number }) => {
+                const rotY = Math.cos(vpTilt);
+                const rotX = Math.sin(vpTilt);
+                return {
+                    x: p.x * rotY - p.y * rotX,
+                    y: p.x * rotX + p.y * rotY,
+                    z: p.z,
+                };
             };
-            points.push(apexPt);
         }
+
+        const rotBase = rawBase.map(rotatePt);
+        const rotTop = rawTop.map(rotatePt);
+        const rotApex = rawApex ? rotatePt(rawApex) : null;
+        const rotAxB = rotatePt(rawAxB);
+        const rotAxT = rotatePt(rawAxT);
+
+        // Grounding: lowest point rests on HP (y = 0) or VP (z = 0)
+        const allRotPts = [...rotBase, ...rotTop, ...(rotApex ? [rotApex] : [])];
+        const minY = Math.min(...allRotPts.map(p => p.y));
+        const minZ = Math.min(...allRotPts.map(p => p.z));
+
+        const shiftY = restingOn === 'HP' ? -minY : 32 - minY;
+        const shiftZ = restingOn === 'HP' ? 38 - minZ : -minZ;
+
+        const basePts: Point3D[] = rotBase.map((p, i) => ({
+            id: `b${i}`,
+            label: String.fromCharCode(97 + i),
+            x: p.x,
+            y: p.y + shiftY,
+            z: p.z + shiftZ,
+            step: 1
+        }));
+
+        const topPts: Point3D[] = rotTop.map((p, i) => ({
+            id: `t${i}`,
+            label: `${String.fromCharCode(97 + i)}'`,
+            x: p.x,
+            y: p.y + shiftY,
+            z: p.z + shiftZ,
+            step: 1
+        }));
+
+        const apexPt: Point3D | null = rotApex ? {
+            id: 'apex',
+            label: "o'",
+            x: rotApex.x,
+            y: rotApex.y + shiftY,
+            z: rotApex.z + shiftZ,
+            step: 1
+        } : null;
+
+        const axisBase: Point3D = {
+            id: 'ax_b',
+            label: '',
+            x: rotAxB.x,
+            y: rotAxB.y + shiftY,
+            z: rotAxB.z + shiftZ,
+            step: 1
+        };
+
+        const axisTop: Point3D = apexPt ?? {
+            id: 'ax_t',
+            label: '',
+            x: rotAxT.x,
+            y: rotAxT.y + shiftY,
+            z: rotAxT.z + shiftZ,
+            step: 1
+        };
 
         basePts.forEach(p => points.push(p));
         topPts.forEach(p => points.push(p));
+        if (apexPt) points.push(apexPt);
 
         for (let i = 0; i < numSides; i++) {
             addSegment(basePts[i], basePts[(i + 1) % numSides], 'object', 'solid', '#004d40', 1);
@@ -760,19 +877,38 @@ export function resolveScene3D(geometry: GeometryOutput): Scene3DData {
             }
         }
 
-        const axisBase: Point3D = { id: 'ax_b', label: '', x: 0, y: restingOn === 'HP' ? 0 : 32, z: restingOn === 'HP' ? 32 : 0, step: 1 };
-        const axisTop: Point3D = isPrism
-            ? { id: 'ax_t', label: '', x: 0, y: restingOn === 'HP' ? height * Math.cos(hpTilt) : 32, z: restingOn === 'HP' ? 32 + height * Math.sin(hpTilt) : height, step: 1 }
-            : apexPt!;
         addSegment(axisBase, axisTop, 'axis', 'chain', '#dc2626', 1);
 
         dimensions.push({
             id: 'dim_axis',
             p1: axisBase,
             p2: axisTop,
-            label: `h = ${Math.round(height)} mm`,
+            label: `Axis h = ${Math.round(height)} mm`,
             step: 1,
         });
+
+        if (hpTilt > 0.01) {
+            angleAnnotations.push({
+                origin: axisBase,
+                dirBase: { x: axisTop.x - axisBase.x, y: 0, z: axisTop.z - axisBase.z },
+                dirInclined: { x: axisTop.x - axisBase.x, y: axisTop.y - axisBase.y, z: axisTop.z - axisBase.z },
+                radius: 24,
+                label: `θ=${Math.round(hpTiltDeg)}° to HP`,
+                plane: 'HP',
+                step: 1,
+            });
+        }
+        if (vpTilt > 0.01) {
+            angleAnnotations.push({
+                origin: axisBase,
+                dirBase: { x: axisTop.x - axisBase.x, y: axisTop.y - axisBase.y, z: 0 },
+                dirInclined: { x: axisTop.x - axisBase.x, y: axisTop.y - axisBase.y, z: axisTop.z - axisBase.z },
+                radius: 24,
+                label: `φ=${Math.round(vpTiltDeg)}° to VP`,
+                plane: 'VP',
+                step: 1,
+            });
+        }
 
         if (type === 'section_solid' || type === 'advanced_section' || pData?.cutting_plane) {
             const cpData = pData?.cutting_plane;

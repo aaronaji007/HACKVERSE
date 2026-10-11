@@ -505,14 +505,14 @@ export const ThreeDViewModal: React.FC<ThreeDViewModalProps> = ({ geometry, onCl
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-[#c7d7ff] bg-[#f7f9ff]">
                     <div className="flex items-center gap-3">
-                        <img src="/logo-transparent.png" alt="Grafein Logo" className="w-8 h-8 object-contain" />
+                        <img src="/logo-transparent.png" alt="Hackverse Logo" className="w-8 h-8 object-contain" />
                         <div>
                             <div className="flex items-center gap-2">
                                 <h2 className="text-base font-bold text-[#050816] tracking-wide">
                                     3D Spatial Projection View
                                 </h2>
                                 <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#edf3ff] text-[#0b57ff] border border-[#c7d7ff] font-semibold">
-                                    grafein.in
+                                    hackverse
                                 </span>
                             </div>
                             <p className="text-xs text-[#4f5f85]">
