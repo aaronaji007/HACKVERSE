@@ -14,10 +14,14 @@ import { Box } from 'lucide-react';
 const COMMON_EXAMPLE_TITLES = new Set([
     'Point',
     'Line Inclined Both',
+    'Vertical Rectangular Lamina',
+    'Simple Solid',
+    'Inclined Solid (Both)'
 ]);
 
 const MOBILE_EXAMPLE_TITLES = new Set([
     'Line Inclined Both',
+    'Inclined Solid (Both)',
 ]);
 
 export const App: React.FC = () => {

@@ -3381,3 +3381,5 @@ export class GeometryEngine {
 // Fixed hidden lines bug
 
 // Final cleanup for inclined solid
+
+// TODO: implement inclined solid logic correctly
